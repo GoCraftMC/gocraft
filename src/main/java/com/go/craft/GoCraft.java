@@ -17,6 +17,8 @@ public final class GoCraft implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		var mods = GoLanguageAdapter.loadedMods();
+		LOGGER.warn("Go mods are not sandboxed. They run as native code with the same access to your computer as the game itself, "
+				+ "so they can read and change your files, use your network and start programs. Only install Go mods from people you trust.");
 		LOGGER.info("GoCraft ready with {} Go mod(s): {}", mods.size(),
 				mods.stream().map(GoModCandidate::describe).toList());
 	}

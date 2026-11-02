@@ -3,6 +3,10 @@
 A Fabric mod that loads full Minecraft mods written in Go, the way fabric-language-kotlin does for Kotlin.
 Go mods are native code with the whole Go runtime, and to the game they are ordinary mods.
 
+**Go mods are not sandboxed.** They run as native code with the same access to your computer as the game
+itself, so only install ones from people you trust. GoCraft says so in the log on every launch, and on screen
+when the set of installed Go mods changes.
+
 This repo has two parts:
 
 - `src/`: the Fabric mod (`com.go.craft`), which finds `.gomod` files in `mods/gomods` and runs them.

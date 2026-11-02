@@ -5,14 +5,20 @@
   "name": "GoCraft",
   "description": "Language and mod loading layer for full Minecraft mods written in Go. Loads .gomod files from mods/gomods.",
   "authors": ["The GoCraft Authors"],
-  "contact": {},
+  "contact": {
+    "homepage": "https://github.com/GoCraftMC/gocraft",
+    "sources": "https://github.com/GoCraftMC/gocraft",
+    "issues": "https://github.com/GoCraftMC/gocraft/issues"
+  },
   "license": "BSD-4-Clause",
+  "icon": "assets/gocraft/icon.png",
   "environment": "*",
   "languageAdapters": {
     "gocraft": "com.go.craft.loader.GoLanguageAdapter"
   },
   "entrypoints": {
-    "main": ["com.go.craft.GoCraft"]
+    "main": ["com.go.craft.GoCraft"],
+    "client": ["com.go.craft.client.GoCraftClient"]
   },
   "depends": {
     "fabricloader": ">=0.20.0",

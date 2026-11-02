@@ -44,6 +44,7 @@ $limit java --enable-native-access=ALL-UNNAMED -Xmx2G -Dfabric-api.gametest=true
 
 result="$(grep -o 'GOCRAFT-IT RESULT passed=[0-9]* failed=[0-9]*' it.log | tail -1 || true)"
 echo "${result:-NO RESULT LINE: see $run/it.log}"
+grep -q 'Go mods are not sandboxed' it.log || { echo "FAIL: the startup warning is missing"; exit 1; }
 grep -q 'IT logged from package init' it.log || { echo "FAIL: a log call from package init was lost"; exit 1; }
 grep -q 'fib(10) = 55' it.log || { echo "FAIL: /gopher fib did not reply through Brigadier"; exit 1; }
 case "$result" in

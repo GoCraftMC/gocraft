@@ -1,0 +1,4 @@
+{
+  "gocraft.warning.title": "Go mods are not sandboxed",
+  "gocraft.warning.message": "You have these Go mods installed: %s.\n\nGo mods run as native code with the same access to your computer as the game itself. They can read and change your files, use your network and start programs.\n\nOnly install Go mods from people you trust."
+}
