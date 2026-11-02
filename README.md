@@ -36,4 +36,4 @@ This runs `testmod/` inside a real Minecraft server, using Fabric's headless tes
 
 ## License
 
-BSD-4-Clause. This product includes software developed by The GoCraft Authors.
+BSD-3-Clause.

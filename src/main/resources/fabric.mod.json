@@ -10,7 +10,7 @@
     "sources": "https://github.com/GoCraftMC/gocraft",
     "issues": "https://github.com/GoCraftMC/gocraft/issues"
   },
-  "license": "BSD-4-Clause",
+  "license": "BSD-3-Clause",
   "icon": "assets/gocraft/icon.png",
   "environment": "*",
   "languageAdapters": {

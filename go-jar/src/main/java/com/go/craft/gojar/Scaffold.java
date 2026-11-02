@@ -41,7 +41,7 @@ final class Scaffold {
 
 				go 1.26
 
-				require github.com/GoCraftMC/gocraft-sdk v0.1.0
+				require github.com/GoCraftMC/gocraft-sdk v0.1.1
 				""".formatted(pkg));
 		write(root, "src/main/resources/gomod.json", """
 				{
@@ -50,7 +50,7 @@ final class Scaffold {
 				  "name": "%s",
 				  "description": "A Minecraft mod written in Go.",
 				  "authors": [],
-				  "license": "BSD-4-Clause",
+				  "license": "BSD-3-Clause",
 				  "environment": "*",
 				  "depends": {
 				    "minecraft": ">=${minecraft_version}",
