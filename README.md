@@ -8,6 +8,8 @@ This repo has two parts:
 - `src/`: the Fabric mod (`com.go.craft`), which finds `.gomod` files in `mods/gomods` and runs them.
 - `go-jar/`: `go.jar`, the build tool Go mods use instead of Gradle.
 
+Download the mod and `go.jar` from the [releases](https://github.com/GoCraftMC/gocraft/releases).
+
 Read the [documentation](https://github.com/GoCraftMC/gocraft-docs), or see
 [gocraft-example](https://github.com/GoCraftMC/gocraft-example) for a complete mod.
 
