@@ -44,7 +44,9 @@ final class BuiltinTasks {
 		Path mainResources = project.root.resolve("src/main/resources");
 		Path clientResources = project.root.resolve("src/client/resources");
 		Path generatedResources = project.build().resolve("resources");
-		Path generatedMain = project.build().resolve("generated/gocraftmain");
+		// The underscore hides it from Go's wildcards. go mod tidy would otherwise read this stale file, and
+		// fail on a package that was just renamed or deleted, until the next build regenerated it.
+		Path generatedMain = project.build().resolve("_generated/gocraftmain");
 
 		task("processResources").describe("build", "Expands ${tokens} in gomod.json and collects resources.")
 				.input(mainResources, clientResources, project.root.resolve("build.toml"))
