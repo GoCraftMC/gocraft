@@ -84,7 +84,7 @@ final class Toml {
 	private static Object parseValue(String value) {
 		if (value.startsWith("\"")) {
 			if (!value.endsWith("\"") || value.length() < 2) throw new IllegalArgumentException("unterminated string");
-			return value.substring(1, value.length() - 1).replace("\\\"", "\"").replace("\\\\", "\\").replace("\\n", "\n").replace("\\t", "\t");
+			return unescape(value.substring(1, value.length() - 1));
 		}
 		if (value.startsWith("[")) {
 			if (!value.endsWith("]")) throw new IllegalArgumentException("unterminated array");
@@ -101,6 +101,27 @@ final class Toml {
 		} catch (NumberFormatException e) {
 			throw new IllegalArgumentException("cannot parse value: " + value);
 		}
+	}
+
+	/** One pass, so that the backslash in "C:\\\\new" cannot go on to form a newline with the n. */
+	private static String unescape(String body) {
+		StringBuilder out = new StringBuilder();
+		for (int i = 0; i < body.length(); i++) {
+			char c = body.charAt(i);
+			if (c != '\\' || i + 1 == body.length()) {
+				out.append(c);
+				continue;
+			}
+			char next = body.charAt(++i);
+			switch (next) {
+				case 'n' -> out.append('\n');
+				case 't' -> out.append('\t');
+				case '"' -> out.append('"');
+				case '\\' -> out.append('\\');
+				default -> throw new IllegalArgumentException("unknown escape \\" + next);
+			}
+		}
+		return out.toString();
 	}
 
 	private static List<String> splitTopLevel(String body) {

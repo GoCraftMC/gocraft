@@ -29,7 +29,7 @@ import java.util.TreeMap;
  * Types outside the list appear as jvm.Object.
  */
 final class Bindings {
-	static final int VERSION = 1;
+	static final int VERSION = 3;
 	private static final Set<String> KEYWORDS = Set.of("break", "default", "func", "interface", "select", "case", "defer", "go", "map", "struct",
 			"chan", "else", "goto", "package", "switch", "const", "fallthrough", "if", "range", "type", "continue", "for", "import", "return", "var", "string", "error", "len", "new", "nil");
 	/** Promoted from jvm.Object, so a generated method of this name would change its meaning. */
@@ -173,11 +173,12 @@ final class Bindings {
 			out.append("func Wrap").append(goName).append("(o jvm.Objecter) ").append(goName).append(" { return ").append(goName).append("{o.JavaObject()} }\n\n");
 		}
 
-		generateFields(internal, javaName, goName, model, names, out);
-		generateMethods(javaName, goName, model, names, out);
+		// Methods first: where a field and a getter want one Go name, the getter should keep it.
+		Set<String> used = generateMethods(javaName, goName, model, names, out);
+		generateFields(javaName, goName, model, names, used, out);
 	}
 
-	private static void generateFields(String internal, String javaName, String goName, ClassModel model, Map<String, String> names, StringBuilder out) {
+	private static void generateFields(String javaName, String goName, ClassModel model, Map<String, String> names, Set<String> used, StringBuilder out) {
 		int index = 0;
 		for (FieldModel field : model.fields()) {
 			if (!field.flags().has(AccessFlag.PUBLIC) || field.flags().has(AccessFlag.SYNTHETIC)) continue;
@@ -190,18 +191,21 @@ final class Bindings {
 
 			out.append("var ").append(variable).append(" = jvm.").append(isStatic ? "SF" : "F").append("(\"").append(javaName).append("\", \"").append(name).append("\", \"").append(descriptor).append("\")\n\n");
 			if (isStatic) {
-				out.append("// ").append(goName).append("_").append(name).append(" reads the static field ").append(name).append(".\n");
-				out.append("func ").append(goName).append("_").append(name).append("() ").append(type.result).append(" { return ");
+				String func = used.add(name) ? name : "Field_" + name;
+				out.append("// ").append(goName).append("_").append(func).append(" reads the static field ").append(name).append(".\n");
+				out.append("func ").append(goName).append("_").append(func).append("() ").append(type.result).append(" { return ");
 				out.append(String.format(type.resultExpr, variable + ".GetStatic()")).append(" }\n\n");
 			} else {
-				out.append("// Get").append(exported(name)).append(" reads the field ").append(name).append(".\n");
-				out.append("func (o ").append(goName).append(") Get").append(exported(name)).append("() ").append(type.result).append(" { return ");
+				String func = "Get" + exported(name);
+				if (!used.add(func)) func = "Field" + exported(name);
+				out.append("// ").append(func).append(" reads the field ").append(name).append(".\n");
+				out.append("func (o ").append(goName).append(") ").append(func).append("() ").append(type.result).append(" { return ");
 				out.append(String.format(type.resultExpr, variable + ".Get(o)")).append(" }\n\n");
 			}
 		}
 	}
 
-	private static void generateMethods(String javaName, String goName, ClassModel model, Map<String, String> names, StringBuilder out) {
+	private static Set<String> generateMethods(String javaName, String goName, ClassModel model, Map<String, String> names, StringBuilder out) {
 		List<MethodModel> methods = new ArrayList<>();
 		for (MethodModel method : model.methods()) {
 			if (method.flags().has(AccessFlag.PUBLIC) && !method.flags().has(AccessFlag.SYNTHETIC) && !method.flags().has(AccessFlag.BRIDGE)) {
@@ -260,6 +264,7 @@ final class Bindings {
 			else out.append("return ").append(String.format(ret.resultExpr, call));
 			out.append("\n}\n\n");
 		}
+		return used;
 	}
 
 	private static String trimLeadingComma(StringBuilder args) {

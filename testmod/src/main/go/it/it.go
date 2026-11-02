@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/GoCraftMC/gocraft-sdk/command"
 	"github.com/GoCraftMC/gocraft-sdk/event"
@@ -26,6 +27,14 @@ var (
 	testItem       mc.Item
 	testBlock      registry.RegisteredBlock
 	useCount       atomic.Int64
+	useBlock       registry.RegisteredBlock
+	blockUses      atomic.Int64
+	brokenEvents   atomic.Int64
+	useItemEvents  atomic.Int64
+	useBlockEvents atomic.Int64
+	lastUser       atomic.Value
+	optional       = jvm.SM("no.such.OptionalClass", "get", "()V")
+	lateResolved   = jvm.SM("java.lang.System", "lineSeparator", "()Ljava/lang/String;")
 )
 
 func check(name string, fn func() error) {
@@ -46,6 +55,8 @@ func check(name string, fn func() error) {
 
 func init() {
 	initOrder = "init"
+	// Logging this early used to crash the JVM. It has to wait for the bridge, then reach the log.
+	gocraft.Log().Info("IT logged from package init")
 	gocraft.OnPreLaunch(func() { initOrder += ",preLaunch" })
 	gocraft.Hook("tick_head", func(h *gocraft.HookContext) { hookTicks.Add(1) })
 	gocraft.Hook("motd_override", func(h *gocraft.HookContext) { h.SetReturn("go-hooked-version") })
@@ -58,6 +69,24 @@ func init() {
 		}})
 		testBlock = registry.RegisterBlock("test_block", registry.Block{Hardness: 2, Resistance: 3, Light: 5})
 		registry.AddToTab(registry.TabIngredients, testItem)
+		useBlock = registry.RegisterBlock("use_block", registry.Block{Hardness: 1, Resistance: 1, OnUse: func(ctx registry.UseBlock) mc.InteractionResult {
+			blockUses.Add(1)
+			lastUser.Store(ctx.Player.Name())
+			return mc.Success()
+		}})
+
+		event.BlockBroken(func(level mc.Level, player mc.Player, pos mc.BlockPos, state mc.BlockState) {
+			brokenEvents.Add(1)
+			lastUser.Store(player.Name())
+		})
+		event.UseItem(func(player mc.Player, level mc.Level) mc.InteractionResult {
+			useItemEvents.Add(1)
+			return mc.Pass()
+		})
+		event.UseBlock(func(player mc.Player, level mc.Level, pos mc.BlockPos) mc.InteractionResult {
+			useBlockEvents.Add(1)
+			return mc.Pass()
+		})
 
 		command.Register(command.Literal("goit").Then(
 			command.Arg("n", command.Int()).Executes(func(c *command.Context) int {
@@ -317,6 +346,61 @@ func runAll(server mc.Server) {
 		return nil
 	})
 
+	checkPlayerActions(server)
+
+	check("a failed lazy lookup stays retryable and catchable", func() error {
+		for range 2 {
+			if err := jvm.Try(func() { optional.CallStatic() }); err == nil || !strings.Contains(err.Error(), "ClassNotFound") {
+				return fmt.Errorf("got %v", err)
+			}
+		}
+		if lateResolved.CallStatic().String() == "" {
+			return fmt.Errorf("a good lazy lookup returned nothing")
+		}
+		return nil
+	})
+
+	check("repeated lookups reuse one method id", func() error {
+		class := jvm.FindClass("java.lang.String")
+		if class.Method("length", "()I") != class.Method("length", "()I") {
+			return fmt.Errorf("a new Method per lookup")
+		}
+		members := jvm.FindClass("com.go.craft.bridge.Members").StaticField("methods", "[Lcom/go/craft/bridge/Members$Bound;")
+		before := jvm.ArrayLen(members.GetStatic())
+		for range 1000 {
+			jvm.FindClass("java.lang.String").Constructor("(Ljava/lang/String;)V").CallStatic("x")
+		}
+		if grown := jvm.ArrayLen(members.GetStatic()) - before; grown > 1 {
+			return fmt.Errorf("the method table grew by %d", grown)
+		}
+		return nil
+	})
+
+	check("callbacks are freed once their proxy is collected", func() error {
+		gc := jvm.FindClass("java.lang.System").StaticMethod("gc", "()V")
+		before := jvm.CallbackCount()
+		held := make([]jvm.Object, 20000)
+		for i := range held {
+			held[i] = jvm.Runnable(func() { _ = i })
+		}
+		if grown := jvm.CallbackCount() - before; grown != 20000 {
+			return fmt.Errorf("%d of 20000 callbacks were registered while held", grown)
+		}
+		runtime.KeepAlive(held)
+		held = nil
+
+		var grown int64
+		for range 100 {
+			runtime.GC()
+			gc.CallStatic()
+			time.Sleep(50 * time.Millisecond)
+			if grown = jvm.CallbackCount() - before; grown < 1000 {
+				return nil
+			}
+		}
+		return fmt.Errorf("%d callbacks are still registered", grown)
+	})
+
 	check("commands registered in Go run through Brigadier", func() error {
 		server.RunCommand("goit 42")
 		got, _ := commandOutput.Load().(string)
@@ -390,6 +474,83 @@ func runAll(server mc.Server) {
 	})
 
 	checkTicks(server)
+}
+
+// checkPlayerActions drives the game's own server-side interaction code with a Fabric FakePlayer, the
+// code a real player's packets reach, so the events and overrides below fire the way they do in play.
+func checkPlayerActions(server mc.Server) {
+	const (
+		cGameMode = "net.minecraft.server.level.ServerPlayerGameMode"
+		dPlayer   = "Lnet/minecraft/server/level/ServerPlayer;"
+		dLevel    = "Lnet/minecraft/world/level/Level;"
+		dStack    = "Lnet/minecraft/world/item/ItemStack;"
+		dHand     = "Lnet/minecraft/world/InteractionHand;"
+		dHit      = "Lnet/minecraft/world/phys/BlockHitResult;"
+		dResult   = "Lnet/minecraft/world/InteractionResult;"
+	)
+
+	level := server.Overworld()
+	player := jvm.FindClass("net.fabricmc.fabric.api.entity.FakePlayer").
+		StaticMethod("get", "(Lnet/minecraft/server/level/ServerLevel;)Lnet/fabricmc/fabric/api/entity/FakePlayer;").CallStatic(level).Object()
+	gameMode := jvm.FindClass("net.minecraft.server.level.ServerPlayer").Field("gameMode", "L"+strings.ReplaceAll(cGameMode, ".", "/")+";").Get(player)
+	hand := jvm.FindClass("net.minecraft.world.InteractionHand").StaticField("MAIN_HAND", dHand).GetStatic()
+	modes := jvm.FindClass(cGameMode)
+
+	check("breaking a block fires BlockBroken with the player", func() error {
+		pos := mc.Pos(1, 200, 0)
+		level.SetBlock(pos, testBlock.DefaultState())
+		before := brokenEvents.Load()
+		if !modes.Method("destroyBlock", "(Lnet/minecraft/core/BlockPos;)Z").Call(gameMode, pos).Bool() {
+			return fmt.Errorf("destroyBlock returned false")
+		}
+		if brokenEvents.Load() != before+1 {
+			return fmt.Errorf("BlockBroken fired %d times", brokenEvents.Load()-before)
+		}
+		if name, _ := lastUser.Load().(string); name == "" {
+			return fmt.Errorf("the event's player had no name")
+		}
+		if jvm.Same(level.BlockState(pos).Block(), testBlock.Block) {
+			return fmt.Errorf("the block is still there")
+		}
+		return nil
+	})
+
+	check("using an item fires UseItem and reaches the Go override", func() error {
+		eventsBefore, usesBefore := useItemEvents.Load(), useCount.Load()
+		stack := mc.Stack(testItem, 1)
+		result := modes.Method("useItem", "("+dPlayer+dLevel+dStack+dHand+")"+dResult).Call(gameMode, player, level, stack, hand).Object()
+		if useItemEvents.Load() != eventsBefore+1 {
+			return fmt.Errorf("UseItem fired %d times", useItemEvents.Load()-eventsBefore)
+		}
+		if useCount.Load() != usesBefore+1 {
+			return fmt.Errorf("OnUse ran %d times", useCount.Load()-usesBefore)
+		}
+		// The game returns a copy of Success carrying the item's context, not the shared constant.
+		if !result.IsInstance(jvm.FindClass("net.minecraft.world.InteractionResult$Success")) {
+			return fmt.Errorf("useItem returned %s", result)
+		}
+		return nil
+	})
+
+	check("using a block fires UseBlock and reaches the Go override", func() error {
+		pos := mc.Pos(2, 200, 0)
+		level.SetBlock(pos, useBlock.DefaultState())
+		center := jvm.FindClass("net.minecraft.world.phys.Vec3").StaticMethod("atCenterOf", "(Lnet/minecraft/core/Vec3i;)Lnet/minecraft/world/phys/Vec3;").CallStatic(pos)
+		up := jvm.FindClass("net.minecraft.core.Direction").StaticField("UP", "Lnet/minecraft/core/Direction;").GetStatic()
+		hit := jvm.FindClass("net.minecraft.world.phys.BlockHitResult").
+			New("(Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/core/Direction;Lnet/minecraft/core/BlockPos;Z)V", center, up, pos, false)
+		empty := jvm.FindClass("net.minecraft.world.item.ItemStack").StaticField("EMPTY", dStack).GetStatic()
+
+		eventsBefore, usesBefore := useBlockEvents.Load(), blockUses.Load()
+		modes.Method("useItemOn", "("+dPlayer+dLevel+dStack+dHand+dHit+")"+dResult).Call(gameMode, player, level, empty, hand, hit)
+		if useBlockEvents.Load() != eventsBefore+1 {
+			return fmt.Errorf("UseBlock fired %d times", useBlockEvents.Load()-eventsBefore)
+		}
+		if blockUses.Load() != usesBefore+1 {
+			return fmt.Errorf("the block's OnUse ran %d times", blockUses.Load()-usesBefore)
+		}
+		return nil
+	})
 }
 
 // checkTicks waits for real ticks, because the tick hook and events only run after start-up returns.

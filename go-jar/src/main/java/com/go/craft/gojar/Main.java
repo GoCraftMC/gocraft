@@ -85,8 +85,7 @@ public final class Main {
 	private static int once(Project project, Map<String, Task> tasks, Engine.Options options, List<String> requested, Map<String, String> flags) throws Exception {
 		long start = System.nanoTime();
 		Engine engine = new Engine(project, tasks, options);
-		List<Task> plan = engine.plan(requested);
-		boolean ok = engine.run(plan);
+		boolean ok = engine.runRequested(requested);
 
 		for (Engine.Result result : engine.results()) {
 			if (result.outcome() != Engine.Outcome.FAILED) continue;
@@ -131,7 +130,7 @@ public final class Main {
 				last = fingerprint.toString();
 				long start = System.nanoTime();
 				Engine engine = new Engine(project, tasks, options);
-				boolean ok = engine.run(plan);
+				boolean ok = engine.runRequested(requested);
 
 				for (Engine.Result result : engine.results()) {
 					if (result.outcome() == Engine.Outcome.FAILED) Log.error("\nFAILURE: Task :" + result.task().name + " failed.\n" + result.error().getMessage());

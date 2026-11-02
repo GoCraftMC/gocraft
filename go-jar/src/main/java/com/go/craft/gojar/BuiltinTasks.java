@@ -60,7 +60,10 @@ final class BuiltinTasks {
 					.property("generator", String.valueOf(Bindings.VERSION))
 					.input(project.root.resolve("build.toml"))
 					.output(bindingsDir);
-			gen.does(t -> new Bindings(project).generate(bindingsDir));
+			gen.does(t -> {
+				new Bindings(project).generate(bindingsDir);
+				Exec.capture(project.root, Map.of(), List.of(toolchains.go(), "fmt", "./src/generated/..."));
+			});
 		}
 
 		task("genMain").describe("build", "Generates the package main that links in your entrypoint packages.")
@@ -103,10 +106,15 @@ final class BuiltinTasks {
 		Map<String, String> noEnv = Map.of();
 
 		Task vet = task("vet").describe("verification", "Runs go vet.").depends("genMain");
-		vet.does(t -> Exec.capture(project.root, noEnv, List.of(toolchains.go(), "vet", "./src/...")));
+		vet.does(t -> Exec.capture(project.root, goEnv(Project.hostPlatform()), List.of(toolchains.go(), "vet", "./src/...")));
 
 		Task test = task("test").describe("verification", "Runs Go tests that do not need the game.").depends("genMain");
-		test.does(t -> Log.line(Exec.capture(project.root, noEnv, List.of(toolchains.go(), "test", "./src/...")).strip()));
+		test.does(t -> Log.line(Exec.capture(project.root, goEnv(Project.hostPlatform()), List.of(toolchains.go(), "test", "./src/...")).strip()));
+
+		if (hasBindings) {
+			vet.depends("genBindings");
+			test.depends("genBindings");
+		}
 
 		task("fmt").describe("verification", "Formats Go sources with gofmt.")
 				.does(t -> Exec.capture(project.root, noEnv, List.of(toolchains.go(), "fmt", "./src/...")));
@@ -304,7 +312,16 @@ final class BuiltinTasks {
 	private void addScanned(Path root, String module, Set<String> packages) throws IOException {
 		for (Path file : Files2.walk(root)) {
 			String name = file.getFileName().toString();
-			if (name.endsWith(".go") && !name.endsWith("_test.go")) packages.add(importPath(module, file.getParent()));
+			if (!name.endsWith(".go") || name.endsWith("_test.go")) continue;
+
+			boolean linkable = true;
+			for (Path part : root.relativize(file.getParent())) {
+				String element = part.toString();
+				// Go forbids importing internal packages from outside, and ignores the rest. Whichever
+				// package uses an internal one links it anyway.
+				if (element.equals("internal") || element.equals("testdata") || element.startsWith("_") || element.startsWith(".")) linkable = false;
+			}
+			if (linkable) packages.add(importPath(module, file.getParent()));
 		}
 	}
 
@@ -312,10 +329,9 @@ final class BuiltinTasks {
 		return module + "/" + project.root.relativize(dir).toString().replace('\\', '/');
 	}
 
-	private void compile(String target, Path output, Path generatedMain) throws IOException, InterruptedException {
+	/** The environment for any go command that compiles this project's cgo for a target. */
+	private Map<String, String> goEnv(String target) throws IOException, InterruptedException {
 		String[] parts = target.split("-");
-		if (parts.length != 2) throw new BuildException("Target must look like linux-amd64, got " + target);
-
 		Map<String, String> env = new LinkedHashMap<>();
 		env.put("CGO_ENABLED", "1");
 		env.put("GOOS", parts[0]);
@@ -325,6 +341,15 @@ final class BuiltinTasks {
 		String cc = toolchains.cCompiler(target);
 		if (cc != null) env.put("CC", cc);
 		if (cc != null && parts[0].equals("darwin")) env.put("CGO_LDFLAGS", toolchains.macosStubFlags());
+		return env;
+	}
+
+	private void compile(String target, Path output, Path generatedMain) throws IOException, InterruptedException {
+		String[] parts = target.split("-");
+		if (parts.length != 2) throw new BuildException("Target must look like linux-amd64, got " + target);
+
+		Map<String, String> env = goEnv(target);
+		String cc = env.get("CC");
 
 		Files2.deleteTree(output);
 		Files.createDirectories(output);

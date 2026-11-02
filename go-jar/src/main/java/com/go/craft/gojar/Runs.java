@@ -100,6 +100,8 @@ final class Runs {
 
 		List<String> classpath = install.classpath.stream().map(Path::toString).toList();
 		List<String> command = new ArrayList<>(List.of(java(), "--enable-native-access=ALL-UNNAMED"));
+		// GLFW can only create a window from the first thread on macOS.
+		if (Project.hostPlatform().startsWith("darwin")) command.add("-XstartOnFirstThread");
 		command.addAll(project.list("run", "jvm_args"));
 		command.addAll(List.of("-cp", String.join(java.io.File.pathSeparator, classpath), "-Dfabric.gameJarPath.client=" + classpath.getLast(), install.mainClass,
 				"--username", flags.getOrDefault("username", "Dev"), "--version", project.minecraft,

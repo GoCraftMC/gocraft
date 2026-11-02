@@ -70,6 +70,22 @@ final class Engine {
 		ordered.put(task.name, task);
 	}
 
+	/**
+	 * Runs requested tasks one after another, each with its dependencies in parallel, so that
+	 * 'clean build' cannot delete what the build is writing. A task runs at most once.
+	 */
+	boolean runRequested(List<String> requested) throws InterruptedException {
+		Map<String, Task> done = new LinkedHashMap<>();
+		for (String name : requested) {
+			Map<String, Task> ordered = new LinkedHashMap<>();
+			visit(resolve(name), ordered, new HashSet<>(), new ArrayList<>());
+			List<Task> group = ordered.values().stream().filter(t -> !done.containsKey(t.name)).toList();
+			if (!run(group)) return false;
+			for (Task task : group) done.put(task.name, task);
+		}
+		return true;
+	}
+
 	/** Returns false if any task failed. */
 	boolean run(List<Task> plan) throws InterruptedException {
 		if (options.dryRun) {

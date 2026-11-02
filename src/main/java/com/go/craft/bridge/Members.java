@@ -3,8 +3,9 @@ package com.go.craft.bridge;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Resolves classes, methods and fields by name and descriptor, and remembers them by id so Go only
@@ -18,8 +19,13 @@ final class Members {
 
 	record BoundField(MethodHandle getter, MethodHandle setter, char kind, boolean hasReceiver) { }
 
-	private static final List<Bound> METHODS = new ArrayList<>();
-	private static final List<BoundField> FIELDS = new ArrayList<>();
+	private record Key(Class<?> owner, String name, String desc, boolean isStatic) { }
+
+	private static final Map<Key, Long> METHOD_IDS = new HashMap<>();
+	private static final Map<Key, Long> FIELD_IDS = new HashMap<>();
+	// Replaced, never mutated, so that every invoke can read them without taking the lookup lock.
+	private static volatile Bound[] methods = new Bound[0];
+	private static volatile BoundField[] fields = new BoundField[0];
 
 	private Members() { }
 
@@ -40,6 +46,10 @@ final class Members {
 	}
 
 	static synchronized long findMethod(Class<?> owner, String name, String desc, boolean isStatic) throws ReflectiveOperationException {
+		Key key = new Key(owner, name, desc, isStatic);
+		Long known = METHOD_IDS.get(key);
+		if (known != null) return known;
+
 		MethodType type = MethodType.fromMethodDescriptorString(desc, loader());
 		MethodHandles.Lookup lookup = lookupIn(owner);
 		MethodHandle handle;
@@ -62,15 +72,22 @@ final class Members {
 		MethodHandle spread = handle.asFixedArity().asSpreader(Object[].class, arity)
 				.asType(MethodType.methodType(Object.class, Object[].class));
 
-		METHODS.add(new Bound(spread, kinds, hasReceiver, returnKind));
-		return METHODS.size();
+		Bound[] grown = Arrays.copyOf(methods, methods.length + 1);
+		grown[methods.length] = new Bound(spread, kinds, hasReceiver, returnKind);
+		methods = grown;
+		METHOD_IDS.put(key, (long) grown.length);
+		return grown.length;
 	}
 
-	static synchronized Bound method(long id) {
-		return METHODS.get((int) id - 1);
+	static Bound method(long id) {
+		return methods[(int) id - 1];
 	}
 
 	static synchronized long findField(Class<?> owner, String name, String desc, boolean isStatic) throws ReflectiveOperationException {
+		Key key = new Key(owner, name, desc, isStatic);
+		Long known = FIELD_IDS.get(key);
+		if (known != null) return known;
+
 		Class<?> type = MethodType.fromMethodDescriptorString("(" + desc + ")V", loader()).parameterType(0);
 		MethodHandles.Lookup lookup = lookupIn(owner);
 		MethodHandle getter = isStatic ? lookup.findStaticGetter(owner, name, type) : lookup.findGetter(owner, name, type);
@@ -82,11 +99,14 @@ final class Members {
 			// A final field: reads work, and writes report a clear error from fieldSet.
 		}
 
-		FIELDS.add(new BoundField(getter, setter, Slots.kind(type), !isStatic));
-		return FIELDS.size();
+		BoundField[] grown = Arrays.copyOf(fields, fields.length + 1);
+		grown[fields.length] = new BoundField(getter, setter, Slots.kind(type), !isStatic);
+		fields = grown;
+		FIELD_IDS.put(key, (long) grown.length);
+		return grown.length;
 	}
 
-	static synchronized BoundField field(long id) {
-		return FIELDS.get((int) id - 1);
+	static BoundField field(long id) {
+		return fields[(int) id - 1];
 	}
 }

@@ -39,6 +39,7 @@ public final class NativeMod {
 	private final long token;
 	private final MethodHandle dispatch;
 	private final MethodHandle entry;
+	private final MethodHandle releaseCallback;
 
 	public static NativeMod of(GoModCandidate candidate) {
 		return BY_ID.computeIfAbsent(candidate.id(), key -> load(candidate));
@@ -82,6 +83,8 @@ public final class NativeMod {
 				FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG));
 		this.dispatch = linker.downcallHandle(require(symbols, "gocraft_dispatch"),
 				FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG));
+
+		this.releaseCallback = linker.downcallHandle(require(symbols, "gocraft_release_callback"), FunctionDescriptor.ofVoid(ValueLayout.JAVA_LONG));
 
 		try (Arena arena = Arena.ofConfined()) {
 			byte[] name = id.getBytes(StandardCharsets.UTF_8);
@@ -157,6 +160,10 @@ public final class NativeMod {
 			}
 			frame.top = base;
 		}
+	}
+
+	void releaseCallback(long callback) throws Throwable {
+		releaseCallback.invokeExact(callback);
 	}
 
 	private void throwResult(int status, long handle) throws Throwable {

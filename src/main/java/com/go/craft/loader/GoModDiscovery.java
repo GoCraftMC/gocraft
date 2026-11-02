@@ -78,12 +78,8 @@ final class GoModDiscovery {
 
 		for (Path file : files) {
 			try {
-				GoModCandidate mod = open(file);
-
-				if (!mod.metadata().loadsInEnvironment(env)) {
-					Log.info(LOG, "Skipping %s: not for the %s environment", mod.describe(), env);
-					continue;
-				}
+				GoModCandidate mod = open(file, env);
+				if (mod == null) continue;
 
 				GoModCandidate previous = mods.putIfAbsent(mod.id(), mod);
 				if (previous != null) problems.add("Mod id '" + mod.id() + "' is provided by both " + previous.source().getFileName() + " and " + file.getFileName());
@@ -104,7 +100,8 @@ final class GoModDiscovery {
 		return sortByDependencies(mods);
 	}
 
-	private GoModCandidate open(Path file) throws IOException {
+	/** Returns null for a mod that is not for this environment. */
+	private GoModCandidate open(Path file, EnvType env) throws IOException {
 		String hash = sha256(file);
 
 		try (ZipFile zip = new ZipFile(file.toFile())) {
@@ -131,6 +128,15 @@ final class GoModDiscovery {
 				for (JsonElement hook : manifest.getAsJsonArray("hooks")) hooks.add(HookSpec.parse(hook.getAsJsonObject(), id));
 			}
 
+			String fabricJson = fabricModJson(manifest, hooks);
+			LoaderModMetadata metadata = parseMetadata(fabricJson, file);
+
+			// Before the platform check: a client-only mod need not ship natives for a server's platform.
+			if (!metadata.loadsInEnvironment(env)) {
+				Log.info(LOG, "Skipping %s: not for the %s environment", id, env);
+				return null;
+			}
+
 			String platform = platform();
 			String libraryName = "natives/" + platform + "/mod." + libraryExtension();
 			ZipEntry library = zip.getEntry(libraryName);
@@ -141,7 +147,6 @@ final class GoModDiscovery {
 			Path runtime = gameDir.resolve(".gocraft").resolve("runtime").resolve(id + "-" + hash.substring(0, 16) + "-" + RUNTIME_FORMAT);
 			Path jar = runtime.resolve(id + ".jar");
 			Path libraryFile = runtime.resolve("mod." + libraryExtension());
-			String fabricJson = fabricModJson(manifest, hooks);
 
 			if (!Files.exists(jar) || !Files.exists(libraryFile)) {
 				Files.createDirectories(runtime);
@@ -153,7 +158,6 @@ final class GoModDiscovery {
 				writeAtomic(jar, out -> buildJar(zip, id, fabricJson, hooks, out));
 			}
 
-			LoaderModMetadata metadata = parseMetadata(fabricJson, file);
 			return new GoModCandidate(id, manifest.get("version").getAsString(), file, jar, libraryFile, metadata, List.copyOf(hooks));
 		}
 	}
@@ -254,9 +258,19 @@ final class GoModDiscovery {
 	}
 
 	private static Version findVersion(String id, Map<String, GoModCandidate> mods) {
-		GoModCandidate go = mods.get(id);
+		GoModCandidate go = findProvider(id, mods);
 		if (go != null) return go.metadata().getVersion();
 		return FabricLoader.getInstance().getModContainer(id).map(ModContainer::getMetadata).map(m -> m.getVersion()).orElse(null);
+	}
+
+	private static GoModCandidate findProvider(String id, Map<String, GoModCandidate> mods) {
+		GoModCandidate direct = mods.get(id);
+		if (direct != null) return direct;
+
+		for (GoModCandidate mod : mods.values()) {
+			if (mod.metadata().getProvides().contains(id)) return mod;
+		}
+		return null;
 	}
 
 	/** Dependencies initialize first, matching how a Go mod would expect its libraries to behave. */
@@ -277,7 +291,8 @@ final class GoModDiscovery {
 
 		state.put(mod.id(), false);
 		for (ModDependency dep : mod.metadata().getDependencies()) {
-			if (dep.getKind() == ModDependency.Kind.DEPENDS && mods.containsKey(dep.getModId())) visit(mods.get(dep.getModId()), mods, state, out);
+			GoModCandidate provider = findProvider(dep.getModId(), mods);
+			if (dep.getKind() == ModDependency.Kind.DEPENDS && provider != null) visit(provider, mods, state, out);
 		}
 		state.put(mod.id(), true);
 		out.add(mod);
