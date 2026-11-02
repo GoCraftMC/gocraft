@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "gocraft",
+  "version": "${version}",
+  "name": "GoCraft",
+  "description": "Language and mod loading layer for full Minecraft mods written in Go. Loads .gomod files from mods/gomods.",
+  "authors": ["The GoCraft Authors"],
+  "contact": {},
+  "license": "BSD-4-Clause",
+  "environment": "*",
+  "languageAdapters": {
+    "gocraft": "com.go.craft.loader.GoLanguageAdapter"
+  },
+  "entrypoints": {
+    "main": ["com.go.craft.GoCraft"]
+  },
+  "depends": {
+    "fabricloader": ">=0.20.0",
+    "minecraft": ">=26.3",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}

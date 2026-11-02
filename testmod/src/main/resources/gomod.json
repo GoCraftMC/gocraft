@@ -1,0 +1,11 @@
+{
+  "id": "${id}",
+  "version": "${version}",
+  "name": "GoCraft Integration Test",
+  "environment": "*",
+  "depends": { "minecraft": ">=${minecraft_version}", "gocraft": "*", "gopher": ">=1.0.0" },
+  "hooks": [
+    { "id": "tick_head", "target": "net.minecraft.server.MinecraftServer", "method": "tickServer", "desc": "(Ljava/util/function/BooleanSupplier;)V", "at": "HEAD" },
+    { "id": "motd_override", "target": "net.minecraft.server.MinecraftServer", "method": "getServerVersion", "desc": "()Ljava/lang/String;", "at": "HEAD" }
+  ]
+}

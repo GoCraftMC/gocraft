@@ -1,0 +1,16 @@
+# Exercises the bridge inside a real game. See scripts/integration-test.sh.
+[project]
+id = "gocraft_it"
+version = "1.0.0"
+
+[minecraft]
+version = "26.3"
+loader = "0.20.1"
+fabric_api = "0.165.0+26.3"
+gocraft_jar = "../build/libs/gocraft-0.1.0.jar"
+
+[go]
+version = "system"
+
+[bindings]
+include = ["net.minecraft.world.item.Items", "net.minecraft.world.item.Item", "net.minecraft.world.item.ItemStack"]

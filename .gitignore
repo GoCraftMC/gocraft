@@ -1,0 +1,7 @@
+build/
+.gradle/
+.gocraft/
+run/
+testmod/go.jar
+testmod/go.sum
+testmod/src/generated/
